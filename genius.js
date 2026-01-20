@@ -62,8 +62,9 @@
   let loopPromise = null;
 
   // ========= Auto Refresh 變數 =========
-  let refreshEnabled = localStorage.getItem(REFRESH_CONFIG.KEY_ENABLED);
-  refreshEnabled = refreshEnabled === null ? true : refreshEnabled === '1';
+  const SHOW_REFRESH_UI = false;
+  let refreshEnabled = false;
+  localStorage.setItem(REFRESH_CONFIG.KEY_ENABLED, '0');
   let refreshTimerId = null;
   let refreshTickerId = null;
 
@@ -224,6 +225,11 @@
     refreshBody.appendChild(refreshBtnRow);
     refreshBody.appendChild(refreshTip);
 
+    if (!SHOW_REFRESH_UI) {
+      refreshHeader.style.display = 'none';
+      refreshBody.style.display = 'none';
+    }
+
     // ========= Assemble UI =========
     root.appendChild(swapHeader);
     root.appendChild(swapBody);
@@ -332,6 +338,27 @@
         (b.querySelector('span')?.innerText || '').trim() === 'Choose');
   }
 
+  function findTokenSelectBtns() {
+    return Array.from(document.querySelectorAll('button'))
+      .filter(b => {
+        const t = b.innerText.trim();
+        if (!t) return false;
+        if (!/USDT|KOGE/.test(t)) return false;
+        return !!b.querySelector('svg');
+      });
+  }
+
+  async function openTokenDialogByIndex(idx) {
+    const tokenBtns = findTokenSelectBtns();
+    if (tokenBtns.length > idx) {
+      tokenBtns[idx].click();
+      UI.logSwap('点击代币下拉选择 (index ' + idx + ')');
+      await sleep(SWAP_CONFIG.waitAfterChoose);
+      return true;
+    }
+    return false;
+  }
+
   function findMaxBtn() {
     return Array.from(document.querySelectorAll('button'))
       .find(b => ["MAX", "最大"].includes(b.innerText.trim().toUpperCase()));
@@ -362,10 +389,10 @@
 
   async function fixSameAssetSelection() {
     UI.logSwap('⚠️ 检测到相同资产，重新选择代币...');
+    selectedFromToken = null;
+
     const chooseBtns = findChooseBtns();
     if (chooseBtns.length > 0) {
-      selectedFromToken = null;
-
       chooseBtns[0].click();
       UI.logSwap("点击第一个 Choose (From)");
       await sleep(SWAP_CONFIG.waitAfterChoose);
@@ -391,7 +418,27 @@
       return true;
     }
 
-    UI.logSwap("❌ 未找到 Choose 按钮，无法重选");
+    UI.logSwap("❌ 未找到 Choose 按钮，改用代币下拉重选...");
+    const openedFrom = await openTokenDialogByIndex(0);
+    if (openedFrom && isDialogOpen()) {
+      await selectMaxBalanceToken();
+      await sleep(SWAP_CONFIG.waitAfterTokenSelect);
+    }
+
+    await sleep(500);
+    const openedReceive = await openTokenDialogByIndex(1);
+    if (openedReceive && isDialogOpen()) {
+      await selectReceiveToken();
+      await sleep(SWAP_CONFIG.waitAfterTokenSelect);
+    }
+
+    if (openedFrom || openedReceive) {
+      UI.logSwap("✅ 重新选择完成");
+      await sleep(500);
+      return true;
+    }
+
+    UI.logSwap("❌ 未找到代币下拉按钮，无法重选");
     return false;
   }
 
@@ -661,8 +708,7 @@
   // ========= 初始化 =========
   function init() {
     mountUI();
-    if (refreshEnabled) scheduleRefresh();
-    else UI.renderRefresh();
+    UI.renderRefresh();
 
     // 如果刷新前 Swap Bot 是運行的，自動重啟
     if (swapEnabled) {
