@@ -1,4 +1,4 @@
-/ ==UserScript==
+// ==UserScript==
 // @name         Auto Swap Bot + Random Auto Refresh
 // @namespace    https://hunter-association.io
 // @version      2.1.0
