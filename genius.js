@@ -39,6 +39,7 @@
     waitForHover: 500,
     waitBeforeStart: 1200,
     KEY_SWAP_ENABLED: 'tg_swap_enabled',
+    maxSuccessTrades: 10,
   };
 
   // ========= 共用工具函數 =========
@@ -60,6 +61,8 @@
   let isSwapRunning = false;
   let selectedFromToken = null;
   let loopPromise = null;
+  let swapSuccessCount = 0;
+  const MAX_SUCCESS_TRADES = 20;
 
   // ========= Auto Refresh 變數 =========
   const SHOW_REFRESH_UI = false;
@@ -339,13 +342,33 @@
   }
 
   function findTokenSelectBtns() {
-    return Array.from(document.querySelectorAll('button'))
+    const btns = Array.from(document.querySelectorAll('button'))
       .filter(b => {
         const t = b.innerText.trim();
         if (!t) return false;
         if (!/USDT|KOGE/.test(t)) return false;
         return !!b.querySelector('svg');
-      });
+      })
+      .map(b => ({ b, top: b.getBoundingClientRect().top }))
+      .filter(item => Number.isFinite(item.top))
+      .sort((a, b) => a.top - b.top)
+      .map(item => item.b);
+
+    return btns;
+  }
+
+  function getTokenFromBtn(btn) {
+    if (!btn) return null;
+    const m = btn.innerText.match(/USDT|KOGE/);
+    return m ? m[0] : null;
+  }
+
+  function getTokenFromUIByIndex(idx) {
+    const tokenBtns = findTokenSelectBtns();
+    if (tokenBtns.length > idx) {
+      return getTokenFromBtn(tokenBtns[idx]);
+    }
+    return null;
   }
 
   async function openTokenDialogByIndex(idx) {
@@ -497,6 +520,14 @@
   async function selectReceiveToken() {
     await sleep(SWAP_CONFIG.waitAfterChoose);
 
+    if (!selectedFromToken) {
+      const fromUI = getTokenFromUIByIndex(0);
+      if (fromUI) {
+        selectedFromToken = fromUI;
+        UI.logSwap('From 读取为 ' + fromUI);
+      }
+    }
+
     const targetToken = selectedFromToken === 'USDT' ? 'KOGE' : 'USDT';
     UI.logSwap('From 是 ' + selectedFromToken + '，Receive 选择 ' + targetToken);
 
@@ -516,32 +547,21 @@
 
     await sleep(300);
 
-    const tokenRows = document.querySelectorAll('[role="dialog"] .relative.group');
-    for (const row of tokenRows) {
-      const symbolEl = row.querySelector('.text-sm.text-genius-cream');
-      const symbol = symbolEl?.innerText?.trim();
+    const dialog = document.querySelector('[role="dialog"]');
+    const searchInput = dialog?.querySelector('input[type="text"], input[placeholder*="Search" i]');
+    if (searchInput) {
+      searchInput.value = targetToken;
+      searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+      await sleep(200);
+    }
 
-      if (symbol === targetToken) {
-        UI.logSwap('找到 ' + symbol + '，尝试选择 BNB 链...');
-
-        row.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
-        await sleep(SWAP_CONFIG.waitForHover);
-
-        const chainMenu = row.querySelector('.genius-shadow');
-        if (chainMenu) {
-          const chainOptions = chainMenu.querySelectorAll('.cursor-pointer');
-          for (const opt of chainOptions) {
-            const chainName = opt.querySelector('span')?.innerText?.trim();
-            if (chainName === 'BNB' || chainName === 'Binance') {
-              opt.click();
-              UI.logSwap('✅ Receive 选择了 ' + symbol + ' (BNB链)');
-              return true;
-            }
-          }
-        }
-
+    const symbolEls = Array.from(document.querySelectorAll('[role="dialog"] *'))
+      .filter(el => (el?.innerText || '').trim() === targetToken);
+    for (const symbolEl of symbolEls) {
+      const row = symbolEl.closest('.cursor-pointer') || symbolEl.closest('tr') || symbolEl;
+      if (row) {
         row.click();
-        UI.logSwap('✅ Receive 直接选择了 ' + symbol);
+        UI.logSwap('✅ Receive 选择了 ' + targetToken);
         return true;
       }
     }
@@ -654,6 +674,14 @@
             closeAfterConfirm.click();
             UI.logSwap("✅ 关闭成功弹窗");
             await sleep(SWAP_CONFIG.waitAfterClose);
+          }
+
+          swapSuccessCount += 1;
+          UI.logSwap('✅ 成功次数: ' + swapSuccessCount + '/' + MAX_SUCCESS_TRADES);
+          if (swapSuccessCount >= MAX_SUCCESS_TRADES) {
+            UI.logSwap('🎯 已完成 ' + MAX_SUCCESS_TRADES + ' 次，自动停止');
+            stopSwapLoop();
+            break;
           }
 
           const btnSwitch = findSwitchBtn();
