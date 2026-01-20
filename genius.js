@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Swap Bot + Random Auto Refresh
 // @namespace    https://hunter-association.io
-// @version      2.1.0
+// @version      2.4.0
 // @description  Automated swap execution with random auto-refresh (20-40min) - Fixed auto-resume after refresh
 // @grant        none
 // @run-at       document-idle
