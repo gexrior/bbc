@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Swap Bot + Random Auto Refresh
 // @namespace    https://hunter-association.io
-// @version      2.4.0
+// @version      2.5.0
 // @description  Automated swap execution with random auto-refresh (20-40min) - Fixed auto-resume after refresh
 // @grant        none
 // @run-at       document-idle
@@ -62,7 +62,7 @@
   let selectedFromToken = null;
   let loopPromise = null;
   let swapSuccessCount = 0;
-  const MAX_SUCCESS_TRADES = 20;
+  const MAX_SUCCESS_TRADES = 200000000;
 
   // ========= Auto Refresh 變數 =========
   const SHOW_REFRESH_UI = false;
@@ -404,10 +404,58 @@
     return !!document.querySelector('[role="dialog"][data-state="open"]');
   }
 
+  function getOpenDialog() {
+    return document.querySelector('[role="dialog"][data-state="open"]') || document.querySelector('[role="dialog"]');
+  }
+
+  function findSymbolRowInDialog(token) {
+    const dialog = getOpenDialog();
+    if (!dialog) return null;
+    const symbolEls = Array.from(dialog.querySelectorAll('*'))
+      .filter(el => (el?.innerText || '').trim() === token);
+    for (const el of symbolEls) {
+      const row = el.closest('tr') || el.closest('[role="row"]') || el.closest('.cursor-pointer') || el.parentElement;
+      if (row) return row;
+    }
+    return null;
+  }
+
+  function clickUsdtBnbChain(row) {
+    if (!row) return false;
+    const chainCandidates = Array.from(row.querySelectorAll('img, span, button, svg'));
+    for (const el of chainCandidates) {
+      const text = (el.getAttribute?.('title') || el.getAttribute?.('alt') || el.innerText || '').trim();
+      const src = el.getAttribute?.('src') || '';
+      if (/bnb|binance/i.test(text) || /bnb/i.test(src)) {
+        const clickable = el.closest('button') || el.closest('.cursor-pointer') || el;
+        clickable.click();
+        return true;
+      }
+    }
+    return false;
+  }
+
   function hasSameAssetError() {
     const msg = 'The same asset cannot be swapped for itself';
     const cnMsg = '相同资产';
     return document.body?.innerText?.includes(msg) || document.body?.innerText?.includes(cnMsg);
+  }
+
+  async function ensureOppositeTokens() {
+    const from = getTokenFromUIByIndex(0);
+    const receive = getTokenFromUIByIndex(1);
+    if (!from || !receive) return false;
+    if (from !== receive) return true;
+
+    UI.logSwap('⚠️ 发现同资产，强制重选 Receive...');
+    selectedFromToken = from;
+    const opened = await openTokenDialogByIndex(1);
+    if (opened && isDialogOpen()) {
+      const ok = await selectReceiveToken();
+      await sleep(SWAP_CONFIG.waitAfterTokenSelect);
+      return ok;
+    }
+    return false;
   }
 
   async function fixSameAssetSelection() {
@@ -513,6 +561,15 @@
       return true;
     }
 
+    const fallbackRow = findSymbolRowInDialog('USDT') || findSymbolRowInDialog('KOGE');
+    if (fallbackRow) {
+      const token = fallbackRow.innerText.includes('USDT') ? 'USDT' : 'KOGE';
+      fallbackRow.click();
+      selectedFromToken = token;
+      UI.logSwap('✅ From 选择了 ' + token + ' (无余额信息)');
+      return true;
+    }
+
     UI.logSwap("⚠️ 未找到 USDT/KOGE");
     return false;
   }
@@ -547,23 +604,31 @@
 
     await sleep(300);
 
-    const dialog = document.querySelector('[role="dialog"]');
+    const dialog = getOpenDialog();
     const searchInput = dialog?.querySelector('input[type="text"], input[placeholder*="Search" i]');
     if (searchInput) {
+      searchInput.focus();
       searchInput.value = targetToken;
       searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+      searchInput.dispatchEvent(new Event('change', { bubbles: true }));
       await sleep(200);
     }
 
-    const symbolEls = Array.from(document.querySelectorAll('[role="dialog"] *'))
-      .filter(el => (el?.innerText || '').trim() === targetToken);
-    for (const symbolEl of symbolEls) {
-      const row = symbolEl.closest('.cursor-pointer') || symbolEl.closest('tr') || symbolEl;
-      if (row) {
-        row.click();
-        UI.logSwap('✅ Receive 选择了 ' + targetToken);
-        return true;
+    const row = findSymbolRowInDialog(targetToken);
+    if (row) {
+      if (targetToken === 'USDT') {
+        UI.logSwap('找到 USDT，尝试选择 BNB 链...');
+        row.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
+        await sleep(SWAP_CONFIG.waitForHover);
+        if (clickUsdtBnbChain(row)) {
+          UI.logSwap('✅ Receive 选择了 USDT (BNB链)');
+          return true;
+        }
       }
+
+      row.click();
+      UI.logSwap('✅ Receive 选择了 ' + targetToken);
+      return true;
     }
 
     UI.logSwap('⚠️ 未找到 ' + targetToken);
@@ -627,6 +692,11 @@
           UI.logSwap("✅ 代币选择完成");
           await sleep(300);
           continue;
+        }
+
+        const ensured = await ensureOppositeTokens();
+        if (!ensured) {
+          UI.logSwap("⚠️ 未能确认币种方向，继续尝试...");
         }
 
         const btnMax = findMaxBtn();
