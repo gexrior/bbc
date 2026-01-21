@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Swap Bot + Random Auto Refresh
 // @namespace    https://hunter-association.io
-// @version      2.5.0
+// @version      2.3.0
 // @description  Automated swap execution with random auto-refresh (20-40min) - Fixed auto-resume after refresh
 // @grant        none
 // @run-at       document-idle
@@ -411,13 +411,32 @@
   function findSymbolRowInDialog(token) {
     const dialog = getOpenDialog();
     if (!dialog) return null;
+    const tokenRe = new RegExp('(^|\\s)' + token + '(\\s|$)');
     const symbolEls = Array.from(dialog.querySelectorAll('*'))
-      .filter(el => (el?.innerText || '').trim() === token);
+      .filter(el => {
+        const text = (el?.innerText || '').trim();
+        if (!text) return false;
+        if (text === token) return true;
+        if (tokenRe.test(text) && text.length <= token.length + 8) return true;
+        return false;
+      });
     for (const el of symbolEls) {
       const row = el.closest('tr') || el.closest('[role="row"]') || el.closest('.cursor-pointer') || el.parentElement;
       if (row) return row;
     }
     return null;
+  }
+
+  function clickDialogTab(label) {
+    const dialog = getOpenDialog();
+    if (!dialog) return false;
+    const tabEls = Array.from(dialog.querySelectorAll('button, div, span'))
+      .filter(el => (el?.innerText || '').trim().toLowerCase() === label.toLowerCase());
+    if (tabEls.length > 0) {
+      tabEls[0].click();
+      return true;
+    }
+    return false;
   }
 
   function clickUsdtBnbChain(row) {
@@ -614,8 +633,9 @@
       await sleep(200);
     }
 
-    const row = findSymbolRowInDialog(targetToken);
-    if (row) {
+    const trySelectTarget = async () => {
+      const row = findSymbolRowInDialog(targetToken);
+      if (!row) return false;
       if (targetToken === 'USDT') {
         UI.logSwap('找到 USDT，尝试选择 BNB 链...');
         row.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true }));
@@ -627,8 +647,30 @@
       }
 
       row.click();
+      if (targetToken === 'USDT') {
+        await sleep(200);
+        if (clickUsdtBnbChain(getOpenDialog())) {
+          UI.logSwap('✅ Receive 选择了 USDT (BNB链)');
+          return true;
+        }
+        UI.logSwap('⚠️ 未找到 BNB 链，先选择 USDT');
+      }
       UI.logSwap('✅ Receive 选择了 ' + targetToken);
       return true;
+    };
+
+    if (await trySelectTarget()) return true;
+
+    if (clickDialogTab('all')) {
+      UI.logSwap('切换到 All 标签重试');
+      await sleep(200);
+      if (searchInput) {
+        searchInput.value = targetToken;
+        searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+        searchInput.dispatchEvent(new Event('change', { bubbles: true }));
+        await sleep(200);
+      }
+      if (await trySelectTarget()) return true;
     }
 
     UI.logSwap('⚠️ 未找到 ' + targetToken);
