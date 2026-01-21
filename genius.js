@@ -62,7 +62,7 @@
   let selectedFromToken = null;
   let loopPromise = null;
   let swapSuccessCount = 0;
-  const MAX_SUCCESS_TRADES = 200000000;
+  const MAX_SUCCESS_TRADES = 10;
 
   // ========= Auto Refresh 變數 =========
   const SHOW_REFRESH_UI = false;
