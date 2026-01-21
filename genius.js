@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Auto Swap Bot + Random Auto Refresh
 // @namespace    https://hunter-association.io
-// @version      2.3.0
+// @version      2.6.0
 // @description  Automated swap execution with random auto-refresh (20-40min) - Fixed auto-resume after refresh
 // @grant        none
 // @run-at       document-idle
@@ -62,7 +62,7 @@
   let selectedFromToken = null;
   let loopPromise = null;
   let swapSuccessCount = 0;
-  const MAX_SUCCESS_TRADES = 10;
+  const MAX_SUCCESS_TRADES = 30;
 
   // ========= Auto Refresh 變數 =========
   const SHOW_REFRESH_UI = false;
